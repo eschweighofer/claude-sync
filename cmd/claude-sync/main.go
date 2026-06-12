@@ -147,6 +147,7 @@ Supported providers:
   - s3:            Amazon S3
   - gcs:           Google Cloud Storage
   - s3-compatible: Any S3-compatible provider via custom endpoint (Backblaze B2, MinIO, Wasabi, ...)
+  - azure:         Azure Blob Storage (container-scoped SAS URL)
   - webdav:        WebDAV (Nextcloud, ownCloud, etc. - self-hosted)
 
 Examples:
@@ -200,7 +201,7 @@ Examples:
 	cmd.Flags().StringVar(&webdavPathPrefix, "webdav-path-prefix", "claude-sync", "WebDAV path prefix (subdirectory)")
 
 	// Azure flags
-	cmd.Flags().StringVar(&azureURL, "azure-url", "", "Azure Blob Storage container SAS URL")
+	cmd.Flags().StringVar(&azureURL, "azure-url", "", "Azure Blob Storage container SAS URL (e.g. https://account.blob.core.windows.net/container?sv=...)")
 
 	return cmd
 }
@@ -301,7 +302,7 @@ func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, ac
 				"Amazon S3",
 				"Google Cloud Storage",
 				"S3-compatible (custom endpoint) — Backblaze B2, MinIO, Wasabi, ...",
-				"Azure Blob Storage (container-scoped SAS URL)",
+				"Azure Blob Storage (container SAS URL)",
 				"WebDAV (Nextcloud, ownCloud, etc. - self-hosted)",
 			},
 		}
