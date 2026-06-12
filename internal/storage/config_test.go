@@ -392,6 +392,27 @@ func TestNormalizeEndpoint(t *testing.T) {
 	}
 }
 
+func TestValidateAzure(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{"valid https SAS URL", "https://pskyops.blob.core.windows.net/claude-sync?sv=2021&sig=abc", false},
+		{"empty url", "", true},
+		{"http not https", "http://pskyops.blob.core.windows.net/claude-sync?sv=2021&sig=abc", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &StorageConfig{Provider: ProviderAzure, AzureURL: tc.url}
+			err := cfg.validateAzure()
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateAzure() error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
