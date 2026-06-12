@@ -4,7 +4,7 @@
 
 <br>
 
-*Encrypted with [age](https://github.com/FiloSottile/age) • R2 / S3 / GCS / WebDAV supported*
+*Encrypted with [age](https://github.com/FiloSottile/age) • R2 / S3 / GCS / Azure / WebDAV supported*
 
 [![Release](https://img.shields.io/github/v/release/tawanorg/claude-sync)](https://github.com/tawanorg/claude-sync/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -20,7 +20,7 @@
 ## Features
 
 - **Cross-device sync**: Continue Claude Code conversations on any laptop
-- **Multi-provider storage**: Cloudflare R2, AWS S3, Google Cloud Storage, or WebDAV (Nextcloud, ownCloud)
+- **Multi-provider storage**: Cloudflare R2, AWS S3, Google Cloud Storage, Azure Blob Storage, or WebDAV (Nextcloud, ownCloud)
 - **End-to-end encryption**: All files encrypted with age before upload
 - **Passphrase-based keys**: Same passphrase = same key on any device (no file copying)
 - **Interactive wizard**: Arrow-key driven setup with validation
@@ -81,6 +81,7 @@ claude-sync pull
 | **AWS S3** | 5GB (12 months) | AWS users |
 | **Google Cloud Storage** | 5GB | GCP users |
 | **S3-compatible** | varies | Backblaze B2, MinIO, Wasabi, DigitalOcean Spaces, self-hosted |
+| **Azure Blob Storage** | 5GB (12 months) | Azure / Microsoft ecosystem users |
 | **WebDAV** | Self-hosted (unlimited) | Nextcloud/ownCloud users |
 
 ### Step 2: Create a Bucket
@@ -148,51 +149,29 @@ The wizard will create a `claude-sync` subdirectory automatically.
 <details>
 <summary><b>Azure Blob Storage</b></summary>
 
-### Prerequisites
+**Option A — Azure Portal (no CLI required):**
 
-- Azure CLI installed and signed in (`az login`)
-- An Azure storage account
+1. Go to [Azure Portal](https://portal.azure.com) → **Storage accounts** → open your account (or create one)
+2. Go to **Containers** → **+ Container** → name it `claude-sync` → Create
+3. Open the `claude-sync` container → **Shared access tokens** in the left menu
+4. Check all permissions: **Read, Add, Create, Write, Delete, List** → set Expiry (e.g. 2099-01-01) → click **Generate SAS token and URL**
+5. Copy the **Blob SAS URL** — this is your full SAS URL
 
-### 1. Create a container (if it doesn't exist)
-
-```bash
-az storage container create \
-  --account-name <your-storage-account> \
-  --name claude-sync \
-  --auth-mode login
-```
-
-### 2. Generate a container-scoped SAS token
+**Option B — Azure CLI:**
 
 ```bash
-az storage container generate-sas \
-  --account-name <your-storage-account> \
-  --name claude-sync \
-  --permissions racwdl \
-  --expiry 2099-01-01T00:00Z \
-  --subscription <your-subscription-id> \
-  --auth-mode login \
-  --as-user \
-  -o tsv
+# Get your account key, then generate a long-lived SAS token
+KEY=$(az storage account keys list --account-name <account> --query "[0].value" -o tsv)
+TOKEN=$(az storage container generate-sas \
+  --account-name <account> --name claude-sync \
+  --permissions racwdl --expiry 2099-01-01T00:00Z \
+  --account-key "$KEY" -o tsv)
+echo "https://<account>.blob.core.windows.net/claude-sync?$TOKEN"
 ```
 
-### 3. Construct the full SAS URL
+You'll need: the full SAS URL — `https://<account>.blob.core.windows.net/claude-sync?sv=...`
 
-Prepend the service URL to the token output:
-
-```
-https://<your-storage-account>.blob.core.windows.net/claude-sync?<token-from-above>
-```
-
-### 4. Initialize claude-sync
-
-```bash
-claude-sync init
-```
-
-Select **Azure Blob Storage (container SAS URL)** and paste the full SAS URL when prompted.
-
-The SAS URL is stored locally in `~/.claude-sync/config.yaml`. Repeat `claude-sync init` on each device using the same SAS URL.
+> The SAS URL is stored in `~/.claude-sync/config.yaml`. Generate it once and use the same URL on every device. You can also set `CLAUDE_SYNC_AZURE_URL` in your environment to avoid passing it on the command line.
 </details>
 
 ### Step 3: Run Init
