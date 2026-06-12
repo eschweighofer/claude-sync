@@ -1,3 +1,10 @@
+## [1.11.1](https://github.com/tawanorg/claude-sync/compare/v1.11.0...v1.11.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* handle error return values from w.Write in tests ([115951c](https://github.com/tawanorg/claude-sync/commit/115951cf9007ca73ba565726a760ba71ad3ce2eb))
+
 # [1.11.0](https://github.com/tawanorg/claude-sync/compare/v1.10.0...v1.11.0) (2026-06-12)
 
 
