@@ -145,6 +145,56 @@ You'll need: WebDAV URL, Username, App password
 The wizard will create a `claude-sync` subdirectory automatically.
 </details>
 
+<details>
+<summary><b>Azure Blob Storage</b></summary>
+
+### Prerequisites
+
+- Azure CLI installed and signed in (`az login`)
+- An Azure storage account
+
+### 1. Create a container (if it doesn't exist)
+
+```bash
+az storage container create \
+  --account-name <your-storage-account> \
+  --name claude-sync \
+  --auth-mode login
+```
+
+### 2. Generate a container-scoped SAS token
+
+```bash
+az storage container generate-sas \
+  --account-name <your-storage-account> \
+  --name claude-sync \
+  --permissions racwdl \
+  --expiry 2099-01-01T00:00Z \
+  --subscription <your-subscription-id> \
+  --auth-mode login \
+  --as-user \
+  -o tsv
+```
+
+### 3. Construct the full SAS URL
+
+Prepend the service URL to the token output:
+
+```
+https://<your-storage-account>.blob.core.windows.net/claude-sync?<token-from-above>
+```
+
+### 4. Initialize claude-sync
+
+```bash
+claude-sync init
+```
+
+Select **Azure Blob Storage (container SAS URL)** and paste the full SAS URL when prompted.
+
+The SAS URL is stored locally in `~/.claude-sync/config.yaml`. Repeat `claude-sync init` on each device using the same SAS URL.
+</details>
+
 ### Step 3: Run Init
 
 ```bash
