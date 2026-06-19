@@ -164,6 +164,11 @@ Examples:
 			ctx := context.Background()
 			keyPath := config.AgeKeyFilePath()
 
+			// Reusable setup center for interactive runs with no explicit mode flags.
+			if provider == "" && !usePassphrase && !force {
+				return initConfigurationCenter(ctx, keyPath)
+			}
+
 			// Special case: --passphrase with existing config = just regenerate key
 			if usePassphrase && config.Exists() && !force {
 				return initPassphraseOnly(ctx, keyPath)
@@ -206,6 +211,83 @@ Examples:
 	cmd.Flags().StringVar(&azureURL, "azure-url", "", "Azure Blob Storage container SAS URL (e.g. https://account.blob.core.windows.net/container?sv=...) — or set CLAUDE_SYNC_AZURE_URL env var to avoid token in shell history")
 
 	return cmd
+}
+
+func initConfigurationCenter(ctx context.Context, keyPath string) error {
+	for {
+		cloudLabel := "Configure Cloud Channel"
+		if cfg, err := config.Load(); err == nil && cfg != nil && cfg.Storage != nil && cfg.Storage.Provider != "" {
+			cloudLabel = "Cloud Channel (reconfigure)"
+		}
+
+		prompt := &survey.Select{
+			Message: "Configuration Center",
+			Options: []string{cloudLabel, "Update Passphrase", "Finish"},
+		}
+		var choice string
+		if err := survey.AskOne(prompt, &choice); err != nil {
+			return err
+		}
+
+		switch choice {
+		case "Finish":
+			fmt.Println()
+			printSuccess("Configuration saved")
+			fmt.Println()
+			return nil
+		case cloudLabel:
+			provider, err := promptCloudProvider()
+			if err != nil {
+				return err
+			}
+			if err := initFullSetup(ctx, keyPath, provider, "", "", "", "", "", "", "", "", "", "", "", "", "", false, true); err != nil {
+				return err
+			}
+		case "Update Passphrase":
+			if !config.Exists() {
+				printWarning("No existing config found. Configure cloud storage first.")
+				continue
+			}
+			if err := initPassphraseOnly(ctx, keyPath); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func promptCloudProvider() (string, error) {
+	prompt := &survey.Select{
+		Message: "Choose cloud provider:",
+		Options: []string{
+			"Cloudflare R2",
+			"Amazon S3",
+			"Google Cloud Storage",
+			"S3-compatible",
+			"Azure Blob Storage",
+			"WebDAV",
+		},
+	}
+	var choice string
+	if err := survey.AskOne(prompt, &choice); err != nil {
+		return "", err
+	}
+
+	switch choice {
+	case "Cloudflare R2":
+		return "r2", nil
+	case "Amazon S3":
+		return "s3", nil
+	case "Google Cloud Storage":
+		return "gcs", nil
+	case "S3-compatible":
+		return "s3-compatible", nil
+	case "Azure Blob Storage":
+		return "azure", nil
+	case "WebDAV":
+		return "webdav", nil
+	default:
+		return "", fmt.Errorf("unsupported provider choice: %s", choice)
+	}
 }
 
 // initPassphraseOnly handles the case where user just wants to re-enter passphrase
