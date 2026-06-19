@@ -233,7 +233,7 @@ func initConfigurationCenter(ctx context.Context, keyPath string) error {
 			if err != nil {
 				return err
 			}
-			if err := initFullSetup(ctx, keyPath, provider, "", "", "", "", "", "", "", "", "", "", "", "", "", false, true); err != nil {
+			if err := initFullSetup(ctx, keyPath, provider, "", "", "", "", "", "", "", "", "", "", "", "", "", "", false, true); err != nil {
 				return err
 			}
 		case "Update Passphrase":
