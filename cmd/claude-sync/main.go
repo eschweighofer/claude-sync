@@ -20,7 +20,6 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/tawanorg/claude-sync/internal/claudesettings"
 	"github.com/tawanorg/claude-sync/internal/config"
 	"github.com/tawanorg/claude-sync/internal/crypto"
 	"github.com/tawanorg/claude-sync/internal/storage"
@@ -28,7 +27,6 @@ import (
 	"github.com/tawanorg/claude-sync/internal/util"
 
 	// Register storage adapters
-	_ "github.com/tawanorg/claude-sync/internal/storage/azure"
 	_ "github.com/tawanorg/claude-sync/internal/storage/gcs"
 	_ "github.com/tawanorg/claude-sync/internal/storage/r2"
 	_ "github.com/tawanorg/claude-sync/internal/storage/s3"
@@ -72,7 +70,6 @@ func main() {
 		updateCmd(),
 		changelogCmd(),
 		mcpCmd(),
-		autoCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -120,6 +117,7 @@ func initCmd() *cobra.Command {
 	var provider, bucket string
 	var scope string
 	var usePassphrase, force bool
+	var localSource string
 
 	// R2 flags
 	var accountID, accessKey, secretKey string
@@ -136,9 +134,6 @@ func initCmd() *cobra.Command {
 	// WebDAV flags
 	var webdavURL, webdavUsername, webdavPassword, webdavPathPrefix string
 
-	// Azure flags
-	var azureURL string
-
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize claude-sync configuration",
@@ -149,8 +144,8 @@ Supported providers:
   - s3:            Amazon S3
   - gcs:           Google Cloud Storage
   - s3-compatible: Any S3-compatible provider via custom endpoint (Backblaze B2, MinIO, Wasabi, ...)
-  - azure:         Azure Blob Storage (container-scoped SAS URL)
-  - webdav:        WebDAV (Nextcloud, ownCloud, etc. - self-hosted)
+	- webdav:        WebDAV (Nextcloud, ownCloud, etc. - self-hosted)
+	- local-wsl:     Local Windows->WSL VS Code sync (WSL only)
 
 Examples:
   claude-sync init                # Full setup wizard
@@ -175,14 +170,15 @@ Examples:
 			}
 
 			// Normal flow: full setup
-			return initFullSetup(ctx, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, azureURL, scope, usePassphrase, force)
+			return initFullSetup(ctx, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, localSource, scope, usePassphrase, force)
 		},
 	}
 
 	// Provider selection
-	cmd.Flags().StringVar(&provider, "provider", "", "Storage provider: r2, s3, gcs, s3-compatible, or webdav")
+	cmd.Flags().StringVar(&provider, "provider", "", "Storage provider: r2, s3, gcs, s3-compatible, webdav, or local-wsl (WSL only)")
 	cmd.Flags().StringVar(&scope, "scope", "", "Sync scope: 'full' (default, everything) or 'sessions' (conversation history only)")
 	cmd.Flags().StringVar(&bucket, "bucket", "", "Bucket name")
+	cmd.Flags().StringVar(&localSource, "local-source", "", "Source directory for local-wsl mode (Windows path like D:\\... or /mnt/<drive>/...)")
 	cmd.Flags().BoolVar(&usePassphrase, "passphrase", false, "Derive encryption key from passphrase")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing config/key without prompting")
 
@@ -206,9 +202,6 @@ Examples:
 	cmd.Flags().StringVar(&webdavUsername, "webdav-username", "", "WebDAV username")
 	cmd.Flags().StringVar(&webdavPassword, "webdav-password", "", "WebDAV app password")
 	cmd.Flags().StringVar(&webdavPathPrefix, "webdav-path-prefix", "claude-sync", "WebDAV path prefix (subdirectory)")
-
-	// Azure flags
-	cmd.Flags().StringVar(&azureURL, "azure-url", "", "Azure Blob Storage container SAS URL (e.g. https://account.blob.core.windows.net/container?sv=...) — or set CLAUDE_SYNC_AZURE_URL env var to avoid token in shell history")
 
 	return cmd
 }
@@ -297,6 +290,9 @@ func initPassphraseOnly(ctx context.Context, keyPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load existing config: %w", err)
 	}
+	if existingCfg.LocalWSLSource != "" {
+		return fmt.Errorf("--passphrase is not used in local-wsl mode")
+	}
 
 	storageCfg := existingCfg.GetStorageConfig()
 	store, err := storage.New(storageCfg)
@@ -360,7 +356,7 @@ func resolveScope(scope string) (string, error) {
 }
 
 // initFullSetup handles the full init wizard
-func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, azureURL, scope string, usePassphrase, force bool) error {
+func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, localSource, scope string, usePassphrase, force bool) error {
 	if config.Exists() && !force {
 		var overwrite bool
 		prompt := &survey.Confirm{
@@ -379,38 +375,46 @@ func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, ac
 	fmt.Println()
 
 	if provider == "" {
+		options := []string{
+			"Cloudflare R2 (recommended - free tier: 10GB)",
+			"Amazon S3",
+			"Google Cloud Storage",
+			"S3-compatible (custom endpoint) — Backblaze B2, MinIO, Wasabi, ...",
+			"WebDAV (Nextcloud, ownCloud, etc. - self-hosted)",
+		}
+		if isWSL() {
+			options = append(options, "Local sync to WSL (no cloud; Windows VS Code -> WSL VS Code)")
+		}
+
 		prompt := &survey.Select{
 			Message: "Choose your cloud storage provider:",
-			Options: []string{
-				"Cloudflare R2 (recommended - free tier: 10GB)",
-				"Amazon S3",
-				"Google Cloud Storage",
-				"S3-compatible (custom endpoint) — Backblaze B2, MinIO, Wasabi, ...",
-				"Azure Blob Storage (container SAS URL)",
-				"WebDAV (Nextcloud, ownCloud, etc. - self-hosted)",
-			},
+			Options: options,
 		}
 		var choice int
 		if err := survey.AskOne(prompt, &choice); err != nil {
 			return err
 		}
-		switch choice {
-		case 0:
+		if choice == 0 {
 			provider = "r2"
-		case 1:
+		} else if choice == 1 {
 			provider = "s3"
-		case 2:
+		} else if choice == 2 {
 			provider = "gcs"
-		case 3:
+		} else if choice == 3 {
 			provider = "s3-compatible"
-		case 4:
-			provider = "azure"
-		case 5:
+		} else if choice == 4 {
 			provider = "webdav"
+		} else {
+			provider = "local-wsl"
 		}
 	}
 
+	if provider == "local-wsl" && !isWSL() {
+		return fmt.Errorf("provider local-wsl is only available inside WSL")
+	}
+
 	var storageCfg *storage.StorageConfig
+	var localWSLSource string
 	var err error
 	fmt.Println()
 
@@ -423,10 +427,10 @@ func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, ac
 		storageCfg, err = runGCSWizard(gcsProjectID, gcsCredentialsFile, bucket)
 	case "s3-compatible":
 		storageCfg, err = runS3CompatibleWizard(s3Endpoint, accessKey, secretKey, s3Region, bucket)
-	case "azure":
-		storageCfg, err = runAzureWizard(azureURL)
 	case "webdav":
 		storageCfg, err = runWebDAVWizard(webdavURL, webdavUsername, webdavPassword, webdavPathPrefix)
+	case "local-wsl":
+		localWSLSource, err = runLocalWSLWizard(localSource)
 	default:
 		return fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -435,7 +439,35 @@ func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, ac
 		return err
 	}
 	if storageCfg == nil {
-		return fmt.Errorf("setup cancelled")
+		if provider != "local-wsl" {
+			return fmt.Errorf("setup cancelled")
+		}
+	}
+
+	if provider == "local-wsl" {
+		scope, err = resolveScope(scope)
+		if err != nil {
+			return err
+		}
+
+		profile := detectLocalWSLProfile(localWSLSource)
+		cfg := &config.Config{LocalWSLSource: localWSLSource, LocalWSLProfile: profile}
+		if scope == config.ScopeSessions {
+			cfg.Scope = config.ScopeSessions
+		}
+
+		if err := config.Save(cfg); err != nil {
+			return err
+		}
+
+		fmt.Println()
+		fmt.Println(colorGreen + "  Setup complete!" + colorReset)
+		fmt.Println()
+		printInfo("Mode: local-wsl (no external storage)")
+		printInfo("Source: " + localWSLSource)
+		printInfo("Run 'claude-sync pull' in WSL to sync VS Code extension data")
+		fmt.Println()
+		return nil
 	}
 
 	// Step 2: Encryption setup
@@ -519,23 +551,15 @@ skipKeyGen:
 
 	exists, err := store.BucketExists(ctx)
 	if err != nil {
-		if storageCfg.Provider == storage.ProviderAzure {
-			return fmt.Errorf("could not access Azure container: %w", err)
-		}
 		return fmt.Errorf("could not verify bucket '%s': %w", storageCfg.Bucket, err)
 	} else if !exists {
 		if storageCfg.Provider == storage.ProviderWebDAV {
 			return fmt.Errorf("could not access WebDAV path '%s' - check your URL and credentials", storageCfg.PathPrefix)
 		}
-		if storageCfg.Provider == storage.ProviderAzure {
-			return fmt.Errorf("could not access Azure container - check your SAS URL and permissions")
-		}
 		return fmt.Errorf("bucket '%s' does not exist. Please create it first in your storage provider's console.\n  For R2: https://dash.cloudflare.com/ → R2 → Create bucket\n  For S3: https://console.aws.amazon.com/s3/ → Create bucket (use 'automatic' location)\n  For GCS: https://console.cloud.google.com/storage/ → Create bucket", storageCfg.Bucket)
 	}
 	if storageCfg.Provider == storage.ProviderWebDAV {
 		printSuccess("Connected to WebDAV ('" + storageCfg.PathPrefix + "')")
-	} else if storageCfg.Provider == storage.ProviderAzure {
-		printSuccess("Connected to Azure Blob Storage")
 	} else {
 		printSuccess("Connected to '" + storageCfg.Bucket + "'")
 	}
@@ -573,10 +597,24 @@ skipKeyGen:
 		return err
 	}
 
+	// Optional VS Code extension data sync using the same external provider.
+	var vscodeSource string
+	var syncVSCode bool
+	if err := survey.AskOne(&survey.Confirm{Message: "Also sync VS Code extension data?", Default: false}, &syncVSCode); err != nil {
+		return err
+	}
+	if syncVSCode {
+		vscodeSource, err = runLocalWSLWizard("")
+		if err != nil {
+			return err
+		}
+	}
+
 	// Save config
 	cfg := &config.Config{
 		Storage:       storageCfg,
 		EncryptionKey: "~/.claude-sync/age-key.txt",
+		VSCodeSyncSource: vscodeSource,
 	}
 	if scope == config.ScopeSessions {
 		cfg.Scope = config.ScopeSessions
@@ -1097,37 +1135,190 @@ func runWebDAVWizard(webdavURL, username, password, pathPrefix string) (*storage
 	return cfg, nil
 }
 
-func runAzureWizard(azureURL string) (*storage.StorageConfig, error) {
-	fmt.Printf("  %sAzure Blob Storage Setup%s\n\n", colorBold, colorReset)
-	printInfo("You need a container-scoped SAS URL.")
-	fmt.Println()
-	fmt.Printf("  %sGenerate one with:%s\n", colorCyan, colorReset)
-	fmt.Println("  az storage container generate-sas \\")
-	fmt.Println("    --account-name <account> --name <container> \\")
-	fmt.Println("    --permissions racwdl --expiry 2099-01-01T00:00Z \\")
-	fmt.Println("    --auth-mode login --as-user -o tsv")
-	fmt.Println()
-	fmt.Printf("  %sThen construct:%s https://<account>.blob.core.windows.net/<container>?<token>\n", colorCyan, colorReset)
+func runLocalWSLWizard(localSource string) (string, error) {
+	fmt.Printf("  %sVS Code Source Setup%s\n\n", colorBold, colorReset)
+	printInfo("Provide either a Windows path (e.g. D:\\PortableApps\\VSCodeInsiders) or a /mnt/<drive>/... path.")
+	printInfo("Windows paths are converted automatically to /mnt/<drive>/... in WSL.")
+	printInfo("Common VS Code data roots on Windows:")
+	printInfo("  - Installed Stable: C:\\Users\\<you>\\AppData\\Roaming\\Code")
+	printInfo("  - Installed Insiders: C:\\Users\\<you>\\AppData\\Roaming\\Code - Insiders")
+	printInfo("  - Portable: <VSCodeFolder>\\data\\user-data")
 	fmt.Println()
 
-	if azureURL == "" {
-		azureURL = os.Getenv("CLAUDE_SYNC_AZURE_URL")
+	if localSource != "" {
+		resolved, err := resolveLocalSourcePath(localSource)
+		if err != nil {
+			return "", fmt.Errorf("invalid --local-source: %w", err)
+		}
+		return resolved, nil
 	}
 
-	if azureURL == "" {
-		prompt := &survey.Input{
-			Message: "Azure SAS URL (https://...):",
-			Help:    "Full container SAS URL including account, container name, and token.\nTip: set CLAUDE_SYNC_AZURE_URL to avoid passing this on the command line.",
+	choicePrompt := &survey.Select{
+		Message: "Choose Windows VS Code source type:",
+		Options: []string{
+			"Installed VS Code (Stable)",
+			"Installed VS Code (Insiders)",
+			"Portable / Other (enter user-data path manually)",
+		},
+	}
+
+	var choice string
+	if err := survey.AskOne(choicePrompt, &choice); err != nil {
+		return "", err
+	}
+
+	var candidates []string
+	switch choice {
+	case "Installed VS Code (Stable)":
+		candidates = discoverLocalWSLSources("stable")
+	case "Installed VS Code (Insiders)":
+		candidates = discoverLocalWSLSources("insiders")
+	case "Portable / Other (enter user-data path manually)":
+		return promptLocalSourceManual()
+	default:
+		return "", fmt.Errorf("unsupported source choice: %s", choice)
+	}
+
+	if len(candidates) == 0 {
+		printWarning("No matching directories detected for that source type.")
+		return promptLocalSourceManual()
+	}
+
+	if len(candidates) == 1 {
+		return candidates[0], nil
+	}
+
+	pickPrompt := &survey.Select{
+		Message: "Select detected source directory:",
+		Options: candidates,
+	}
+	var selected string
+	if err := survey.AskOne(pickPrompt, &selected); err != nil {
+		return "", err
+	}
+	return selected, nil
+}
+
+func promptLocalSourceManual() (string, error) {
+	var entered string
+	prompt := &survey.Input{
+		Message: "VS Code user-data path (Windows or /mnt path):",
+		Help:    "Examples: D:\\PortableApps\\VSCodeInsiders\\data\\user-data or C:\\Path\\To\\VSCode\\data\\user-data",
+	}
+	if err := survey.AskOne(prompt, &entered, survey.WithValidator(func(ans interface{}) error {
+		p, _ := ans.(string)
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("path is required")
 		}
-		if err := survey.AskOne(prompt, &azureURL, survey.WithValidator(survey.Required)); err != nil {
-			return nil, err
+		_, err := resolveLocalSourcePath(p)
+		return err
+	})); err != nil {
+		return "", err
+	}
+
+	return resolveLocalSourcePath(entered)
+}
+
+func discoverLocalWSLSources(kind string) []string {
+	patternsByKind := map[string][]string{
+		"stable": {
+			"/mnt/*/Users/*/AppData/Roaming/Code",
+		},
+		"insiders": {
+			"/mnt/*/Users/*/AppData/Roaming/Code - Insiders",
+		},
+	}
+
+	patterns := patternsByKind[kind]
+	if len(patterns) == 0 {
+		return nil
+	}
+
+	seen := map[string]struct{}{}
+	results := make([]string, 0, 8)
+	for _, pattern := range patterns {
+		matches, _ := filepath.Glob(pattern)
+		sort.Strings(matches)
+		for _, m := range matches {
+			if _, ok := seen[m]; ok {
+				continue
+			}
+			if fi, err := os.Stat(m); err == nil && fi.IsDir() {
+				seen[m] = struct{}{}
+				results = append(results, m)
+			}
 		}
 	}
 
-	return &storage.StorageConfig{
-		Provider: storage.ProviderAzure,
-		AzureURL: azureURL,
-	}, nil
+	return results
+}
+
+func resolveLocalSourcePath(input string) (string, error) {
+	p := strings.TrimSpace(input)
+	if p == "" {
+		return "", fmt.Errorf("path is required")
+	}
+
+	if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+		return p, nil
+	}
+
+	if converted, ok := windowsPathToWSLPath(p); ok {
+		if fi, err := os.Stat(converted); err == nil && fi.IsDir() {
+			return converted, nil
+		}
+		return "", fmt.Errorf("resolved WSL path does not exist: %s", converted)
+	}
+
+	return "", fmt.Errorf("path does not exist or is not a directory: %s", p)
+}
+
+func windowsPathToWSLPath(p string) (string, bool) {
+	if len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') {
+		drive := strings.ToLower(string(p[0]))
+		rest := strings.ReplaceAll(p[3:], "\\", "/")
+		rest = strings.TrimPrefix(rest, "/")
+		if rest == "" {
+			return "/mnt/" + drive, true
+		}
+		return "/mnt/" + drive + "/" + rest, true
+	}
+
+	// UNC form: \\wsl.localhost\Distro\path\to\dir -> /path/to/dir
+	const uncPrefix = `\\wsl.localhost\\`
+	if strings.HasPrefix(strings.ToLower(p), strings.ToLower(uncPrefix)) {
+		rest := p[len(uncPrefix):]
+		parts := strings.Split(rest, `\\`)
+		if len(parts) >= 2 {
+			linuxPath := "/" + strings.Join(parts[1:], "/")
+			return linuxPath, true
+		}
+	}
+
+	return "", false
+}
+
+func isWSL() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	if os.Getenv("WSL_INTEROP") != "" {
+		return true
+	}
+	b, err := os.ReadFile("/proc/version")
+	if err != nil {
+		return false
+	}
+	v := strings.ToLower(string(b))
+	return strings.Contains(v, "microsoft") || strings.Contains(v, "wsl")
+}
+
+func detectLocalWSLProfile(source string) string {
+	s := strings.ToLower(source)
+	if strings.Contains(s, "code - insiders") {
+		return "insiders"
+	}
+	return "stable"
 }
 
 func pushCmd() *cobra.Command {
@@ -1141,6 +1332,9 @@ func pushCmd() *cobra.Command {
 			cfg, err := config.Load()
 			if err != nil {
 				return err
+			}
+			if cfg.LocalWSLSource != "" {
+				return fmt.Errorf("push is not supported in local-wsl mode; use 'claude-sync pull' to sync from the configured local source")
 			}
 
 			syncer, err := sync.NewSyncer(cfg, quiet)
@@ -1190,6 +1384,19 @@ func pushCmd() *cobra.Command {
 			result, err := syncer.Push(ctx)
 			if err != nil {
 				return err
+			}
+
+			if cfg.VSCodeSyncSource != "" {
+				vsResult, err := syncer.PushVSCodeSource(ctx, cfg.VSCodeSyncSource)
+				if err != nil {
+					return err
+				}
+				if !quiet {
+					fmt.Printf("%s✓%s VS Code extension sync: %d uploaded\n", colorGreen, colorReset, len(vsResult.Uploaded))
+					if len(vsResult.Errors) > 0 {
+						fmt.Printf("%s⚠%s VS Code sync had %d errors\n", colorYellow, colorReset, len(vsResult.Errors))
+					}
+				}
 			}
 
 			if !quiet {
@@ -1257,6 +1464,29 @@ Examples:
 			if err != nil {
 				return err
 			}
+			if cfg.LocalWSLSource != "" {
+				result, err := sync.PullFromLocalWSL(cfg, dryRun)
+				if err != nil {
+					return err
+				}
+				if !quiet {
+					if dryRun {
+						fmt.Printf("%s✓%s Local WSL dry-run: %d files would be synced\n", colorGreen, colorReset, len(result.Downloaded))
+					} else {
+						fmt.Printf("%s✓%s Local WSL VS Code sync complete: %d files synced\n", colorGreen, colorReset, len(result.Downloaded))
+					}
+					if len(result.Errors) > 0 {
+						fmt.Printf("\n%sErrors:%s\n", colorYellow, colorReset)
+						for _, e := range result.Errors {
+							fmt.Printf("  %s•%s %v\n", colorYellow, colorReset, e)
+						}
+					}
+				}
+				if len(result.Errors) > 0 {
+					return fmt.Errorf("local WSL sync completed with %d errors", len(result.Errors))
+				}
+				return nil
+			}
 
 			syncer, err := sync.NewSyncer(cfg, quiet)
 			if err != nil {
@@ -1279,7 +1509,19 @@ Examples:
 
 			// Handle dry-run for normal pulls
 			if dryRun {
-				return showPullPreview(ctx, syncer)
+				if err := showPullPreview(ctx, syncer); err != nil {
+					return err
+				}
+				if cfg.VSCodeSyncSource != "" {
+					vsResult, err := syncer.PullVSCodeSource(ctx, cfg.VSCodeSyncSource, true)
+					if err != nil {
+						return err
+					}
+					if !quiet {
+						fmt.Printf("%s✓%s VS Code extension dry-run: %d files would be synced\n", colorGreen, colorReset, len(vsResult.Downloaded))
+					}
+				}
+				return nil
 			}
 
 			if !quiet {
@@ -1319,6 +1561,19 @@ Examples:
 			result, err := syncer.Pull(ctx)
 			if err != nil {
 				return err
+			}
+
+			if cfg.VSCodeSyncSource != "" {
+				vsResult, err := syncer.PullVSCodeSource(ctx, cfg.VSCodeSyncSource, false)
+				if err != nil {
+					return err
+				}
+				if !quiet {
+					fmt.Printf("%s✓%s VS Code extension sync: %d downloaded\n", colorGreen, colorReset, len(vsResult.Downloaded))
+					if len(vsResult.Errors) > 0 {
+						fmt.Printf("%s⚠%s VS Code sync had %d errors\n", colorYellow, colorReset, len(vsResult.Errors))
+					}
+				}
 			}
 
 			if !quiet {
@@ -2953,114 +3208,4 @@ func runMCPPull(ctx context.Context, syncer *sync.Syncer) error {
 		}
 	}
 	return nil
-}
-
-// auto subcommand — install/remove/show claude-sync hooks in ~/.claude/settings.json
-
-func autoCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "auto",
-		Short: "Manage auto-sync hooks for Claude Code",
-		Long:  `Install or remove claude-sync hooks that automatically push/pull when Claude Code sessions start and stop.`,
-	}
-	cmd.AddCommand(autoEnableCmd(), autoDisableCmd(), autoStatusCmd())
-	return cmd
-}
-
-func autoEnableCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "enable",
-		Short: "Install auto-sync hooks into Claude Code settings",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			s, raw, err := claudesettings.Load()
-			if err != nil {
-				return fmt.Errorf("failed to load Claude settings: %w", err)
-			}
-
-			changed := false
-			if !claudesettings.HasClaudeSyncHook(s.Hooks["SessionStart"]) {
-				s.Hooks["SessionStart"] = claudesettings.AddHook(s.Hooks["SessionStart"], "claude-sync pull -q")
-				changed = true
-			}
-			if !claudesettings.HasClaudeSyncHook(s.Hooks["Stop"]) {
-				s.Hooks["Stop"] = claudesettings.AddHook(s.Hooks["Stop"], "claude-sync push -q")
-				changed = true
-			}
-
-			if !changed {
-				fmt.Println("Auto-sync hooks already installed.")
-				return nil
-			}
-
-			if err := claudesettings.Save(s, raw); err != nil {
-				return fmt.Errorf("failed to save Claude settings: %w", err)
-			}
-
-			fmt.Println("Auto-sync hooks installed:")
-			fmt.Println("  SessionStart → claude-sync pull -q")
-			fmt.Println("  Stop → claude-sync push -q")
-			return nil
-		},
-	}
-}
-
-func autoDisableCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "disable",
-		Short: "Remove auto-sync hooks from Claude Code settings",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			s, raw, err := claudesettings.Load()
-			if err != nil {
-				return fmt.Errorf("failed to load Claude settings: %w", err)
-			}
-
-			before := claudesettings.HasClaudeSyncHook(s.Hooks["SessionStart"]) ||
-				claudesettings.HasClaudeSyncHook(s.Hooks["Stop"])
-
-			s.Hooks["SessionStart"] = claudesettings.RemoveClaudeSyncHooks(s.Hooks["SessionStart"])
-			s.Hooks["Stop"] = claudesettings.RemoveClaudeSyncHooks(s.Hooks["Stop"])
-
-			if !before {
-				fmt.Println("Auto-sync hooks were not installed.")
-				return nil
-			}
-
-			if err := claudesettings.Save(s, raw); err != nil {
-				return fmt.Errorf("failed to save Claude settings: %w", err)
-			}
-
-			fmt.Println("Auto-sync hooks removed.")
-			return nil
-		},
-	}
-}
-
-func autoStatusCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "Show auto-sync hook status",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			s, _, err := claudesettings.Load()
-			if err != nil {
-				return fmt.Errorf("failed to load Claude settings: %w", err)
-			}
-
-			hasStart := claudesettings.HasClaudeSyncHook(s.Hooks["SessionStart"])
-			hasStop := claudesettings.HasClaudeSyncHook(s.Hooks["Stop"])
-
-			if hasStart || hasStop {
-				fmt.Println("Auto-sync hooks: enabled")
-				if hasStart {
-					fmt.Println("  SessionStart → claude-sync pull -q")
-				}
-				if hasStop {
-					fmt.Println("  Stop → claude-sync push -q")
-				}
-			} else {
-				fmt.Println("Auto-sync hooks: not installed")
-				fmt.Println("Run 'claude-sync auto enable' to install.")
-			}
-			return nil
-		},
-	}
 }
