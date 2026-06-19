@@ -48,6 +48,8 @@ const (
 	colorCyan   = "\033[36m"
 	colorGreen  = "\033[32m"
 	colorYellow = "\033[33m"
+
+	vscodeRemotePrefix = "_external/vscode-user-data/"
 )
 
 func main() {
@@ -65,6 +67,7 @@ func main() {
 		pushCmd(),
 		pullCmd(),
 		statusCmd(),
+		overviewCmd(),
 		diffCmd(),
 		conflictsCmd(),
 		resetCmd(),
@@ -1729,6 +1732,7 @@ func statusCmd() *cobra.Command {
 			}
 
 			ctx := context.Background()
+
 			changes, err := syncer.Status(ctx)
 			if err != nil {
 				return err
@@ -1788,6 +1792,180 @@ func statusCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func overviewCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "overview",
+		Short: "Show sync setup and bridge locations",
+		Long:  `Display the configured sync scope, roots, bridge sources, and remote bridge contents.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+
+			syncer, err := sync.NewSyncer(cfg, quiet)
+			if err != nil {
+				return err
+			}
+
+			printStatusOverview(context.Background(), cfg, syncer.GetState())
+			return nil
+		},
+	}
+}
+
+func printStatusOverview(ctx context.Context, cfg *config.Config, state *sync.SyncState) {
+	printStatusLine("Sync scope", describeScope(cfg.Scope))
+	printStatusLine("Claude dir", config.ClaudeDir())
+
+	if storeDir := config.FindWindowsStoreClaudeDir(); storeDir != "" {
+		printStatusLine("Windows Store Claude dir", storeDir)
+		printStatusLine("Windows Store exclusions", fmt.Sprintf("%d pattern(s)", len(cfg.Exclude)))
+	}
+
+	if len(cfg.PathMap) > 0 {
+		keys := make([]string, 0, len(cfg.PathMap))
+		for key := range cfg.PathMap {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		fmt.Println("Path map:")
+		for _, key := range keys {
+			fmt.Printf("  %s -> %s\n", key, cfg.PathMap[key])
+		}
+	}
+
+	printSyncRoots(cfg)
+	printBridgeLocations(cfg)
+	printRemoteBridgeOverview(ctx, cfg)
+
+	if state != nil {
+		if !state.LastSync.IsZero() {
+			printStatusLine("Last sync", state.LastSync.Format(time.RFC3339))
+		}
+		if !state.LastPush.IsZero() {
+			printStatusLine("Last push", state.LastPush.Format(time.RFC3339))
+		}
+		if !state.LastPull.IsZero() {
+			printStatusLine("Last pull", state.LastPull.Format(time.RFC3339))
+		}
+	}
+
+	fmt.Println()
+}
+
+func printStatusLine(label, value string) {
+	if value == "" {
+		return
+	}
+	fmt.Printf("%s: %s\n", label, value)
+}
+
+func describeScope(scope string) string {
+	if scope == "" {
+		return config.ScopeFull
+	}
+	return scope
+}
+
+func printSyncRoots(cfg *config.Config) {
+	claudeDir := config.ClaudeDir()
+	paths := config.ScopedSyncPaths(cfg.Scope)
+	if len(paths) == 0 {
+		return
+	}
+
+	fmt.Println("Sync roots:")
+	for _, path := range paths {
+		fmt.Printf("  %s\n", filepath.Join(claudeDir, path))
+	}
+}
+
+func printBridgeLocations(cfg *config.Config) {
+	if cfg.LocalWSLSource != "" {
+		fmt.Println("Local WSL bridge:")
+		fmt.Printf("  source: %s\n", cfg.LocalWSLSource)
+		if target, err := localWSLTargetUserData(cfg.LocalWSLProfile); err == nil && target != "" {
+			fmt.Printf("  target: %s\n", target)
+		}
+		if files, err := sync.GetLocalFiles(cfg.LocalWSLSource, []string{"User/globalStorage", "User/workspaceStorage"}); err == nil {
+			fmt.Printf("  files: %d\n", len(files))
+		}
+	}
+
+	if cfg.VSCodeSyncSource != "" {
+		fmt.Println("VS Code bridge:")
+		fmt.Printf("  source: %s\n", cfg.VSCodeSyncSource)
+		fmt.Printf("  remote prefix: %s\n", vscodeRemotePrefix)
+		if files, err := sync.GetLocalFiles(cfg.VSCodeSyncSource, []string{"User/globalStorage", "User/workspaceStorage"}); err == nil {
+			fmt.Printf("  files: %d\n", len(files))
+		}
+	}
+}
+
+func printRemoteBridgeOverview(ctx context.Context, cfg *config.Config) {
+	storageCfg := cfg.GetStorageConfig()
+	if err := storageCfg.Validate(); err != nil {
+		return
+	}
+
+	store, err := storage.New(storageCfg)
+	if err != nil {
+		printWarning("Remote bridge inspection unavailable: " + err.Error())
+		return
+	}
+
+	objects, err := store.List(ctx, "_external/")
+	if err != nil {
+		printWarning("Remote bridge inspection unavailable: " + err.Error())
+		return
+	}
+
+	fmt.Println("Remote bridge storage:")
+	if len(objects) == 0 {
+		fmt.Println("  no _external/ objects found")
+		return
+	}
+
+	groups := make(map[string]int)
+	for _, object := range objects {
+		rel := strings.TrimPrefix(object.Key, "_external/")
+		if rel == object.Key {
+			groups["_external/"]++
+			continue
+		}
+		segment := rel
+		if idx := strings.IndexByte(rel, '/'); idx >= 0 {
+			segment = rel[:idx+1]
+		} else if strings.HasSuffix(rel, ".age") {
+			segment = rel
+		} else {
+			segment += "/"
+		}
+		groups[segment]++
+	}
+
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Printf("  %s: %d object(s)\n", key, groups[key])
+	}
+}
+
+func localWSLTargetUserData(profile string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if strings.EqualFold(profile, "insiders") {
+		return filepath.Join(home, ".vscode-server-insiders", "data"), nil
+	}
+	return filepath.Join(home, ".vscode-server", "data"), nil
 }
 
 func diffCmd() *cobra.Command {
