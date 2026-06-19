@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	"github.com/eschweighofer/claude-sync/internal/util"
 
 	// Register storage adapters
+	_ "github.com/eschweighofer/claude-sync/internal/storage/azure"
 	_ "github.com/eschweighofer/claude-sync/internal/storage/gcs"
 	_ "github.com/eschweighofer/claude-sync/internal/storage/r2"
 	_ "github.com/eschweighofer/claude-sync/internal/storage/s3"
@@ -134,6 +136,9 @@ func initCmd() *cobra.Command {
 	// WebDAV flags
 	var webdavURL, webdavUsername, webdavPassword, webdavPathPrefix string
 
+	// Azure flags
+	var azureURL string
+
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize claude-sync configuration",
@@ -144,6 +149,7 @@ Supported providers:
   - s3:            Amazon S3
   - gcs:           Google Cloud Storage
   - s3-compatible: Any S3-compatible provider via custom endpoint (Backblaze B2, MinIO, Wasabi, ...)
+	- azure:          Azure Blob Storage (container-scoped SAS URL)
 	- webdav:        WebDAV (Nextcloud, ownCloud, etc. - self-hosted)
 	- local-wsl:     Local Windows->WSL VS Code sync (WSL only)
 
@@ -170,12 +176,12 @@ Examples:
 			}
 
 			// Normal flow: full setup
-			return initFullSetup(ctx, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, localSource, scope, usePassphrase, force)
+			return initFullSetup(ctx, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, azureURL, localSource, scope, usePassphrase, force)
 		},
 	}
 
 	// Provider selection
-	cmd.Flags().StringVar(&provider, "provider", "", "Storage provider: r2, s3, gcs, s3-compatible, webdav, or local-wsl (WSL only)")
+	cmd.Flags().StringVar(&provider, "provider", "", "Storage provider: r2, s3, gcs, s3-compatible, azure, webdav, or local-wsl (WSL only)")
 	cmd.Flags().StringVar(&scope, "scope", "", "Sync scope: 'full' (default, everything) or 'sessions' (conversation history only)")
 	cmd.Flags().StringVar(&bucket, "bucket", "", "Bucket name")
 	cmd.Flags().StringVar(&localSource, "local-source", "", "Source directory for local-wsl mode (Windows path like D:\\... or /mnt/<drive>/...)")
@@ -202,6 +208,9 @@ Examples:
 	cmd.Flags().StringVar(&webdavUsername, "webdav-username", "", "WebDAV username")
 	cmd.Flags().StringVar(&webdavPassword, "webdav-password", "", "WebDAV app password")
 	cmd.Flags().StringVar(&webdavPathPrefix, "webdav-path-prefix", "claude-sync", "WebDAV path prefix (subdirectory)")
+
+	// Azure flags
+	cmd.Flags().StringVar(&azureURL, "azure-url", "", "Azure Blob Storage container SAS URL (e.g. https://account.blob.core.windows.net/container?sv=...)")
 
 	return cmd
 }
@@ -233,7 +242,7 @@ func initConfigurationCenter(ctx context.Context, keyPath string) error {
 			if err != nil {
 				return err
 			}
-			if err := initFullSetup(ctx, keyPath, provider, "", "", "", "", "", "", "", "", "", "", "", "", "", "", false, true); err != nil {
+			if err := initFullSetup(ctx, keyPath, provider, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", false, true); err != nil {
 				return err
 			}
 		case "Update Passphrase":
@@ -356,7 +365,7 @@ func resolveScope(scope string) (string, error) {
 }
 
 // initFullSetup handles the full init wizard
-func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, localSource, scope string, usePassphrase, force bool) error {
+func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, accessKey, secretKey, s3Region, s3Endpoint, gcsProjectID, gcsCredentialsFile, webdavURL, webdavUsername, webdavPassword, webdavPathPrefix, azureURL, localSource, scope string, usePassphrase, force bool) error {
 	if config.Exists() && !force {
 		var overwrite bool
 		prompt := &survey.Confirm{
@@ -380,6 +389,7 @@ func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, ac
 			"Amazon S3",
 			"Google Cloud Storage",
 			"S3-compatible (custom endpoint) — Backblaze B2, MinIO, Wasabi, ...",
+			"Azure Blob Storage (container SAS URL)",
 			"WebDAV (Nextcloud, ownCloud, etc. - self-hosted)",
 		}
 		if isWSL() {
@@ -403,6 +413,8 @@ func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, ac
 		} else if choice == 3 {
 			provider = "s3-compatible"
 		} else if choice == 4 {
+			provider = "azure"
+		} else if choice == 5 {
 			provider = "webdav"
 		} else {
 			provider = "local-wsl"
@@ -427,6 +439,8 @@ func initFullSetup(ctx context.Context, keyPath, provider, bucket, accountID, ac
 		storageCfg, err = runGCSWizard(gcsProjectID, gcsCredentialsFile, bucket)
 	case "s3-compatible":
 		storageCfg, err = runS3CompatibleWizard(s3Endpoint, accessKey, secretKey, s3Region, bucket)
+	case "azure":
+		storageCfg, err = runAzureWizard(azureURL)
 	case "webdav":
 		storageCfg, err = runWebDAVWizard(webdavURL, webdavUsername, webdavPassword, webdavPathPrefix)
 	case "local-wsl":
@@ -551,15 +565,23 @@ skipKeyGen:
 
 	exists, err := store.BucketExists(ctx)
 	if err != nil {
+		if storageCfg.Provider == storage.ProviderAzure {
+			return fmt.Errorf("could not access Azure container: %w", err)
+		}
 		return fmt.Errorf("could not verify bucket '%s': %w", storageCfg.Bucket, err)
 	} else if !exists {
 		if storageCfg.Provider == storage.ProviderWebDAV {
 			return fmt.Errorf("could not access WebDAV path '%s' - check your URL and credentials", storageCfg.PathPrefix)
 		}
+		if storageCfg.Provider == storage.ProviderAzure {
+			return fmt.Errorf("could not access Azure container - check your SAS URL and permissions")
+		}
 		return fmt.Errorf("bucket '%s' does not exist. Please create it first in your storage provider's console.\n  For R2: https://dash.cloudflare.com/ → R2 → Create bucket\n  For S3: https://console.aws.amazon.com/s3/ → Create bucket (use 'automatic' location)\n  For GCS: https://console.cloud.google.com/storage/ → Create bucket", storageCfg.Bucket)
 	}
 	if storageCfg.Provider == storage.ProviderWebDAV {
 		printSuccess("Connected to WebDAV ('" + storageCfg.PathPrefix + "')")
+	} else if storageCfg.Provider == storage.ProviderAzure {
+		printSuccess("Connected to Azure Blob Storage")
 	} else {
 		printSuccess("Connected to '" + storageCfg.Bucket + "'")
 	}
@@ -1133,6 +1155,63 @@ func runWebDAVWizard(webdavURL, username, password, pathPrefix string) (*storage
 	}
 
 	return cfg, nil
+}
+
+func runAzureWizard(azureURL string) (*storage.StorageConfig, error) {
+	fmt.Printf("  %sAzure Blob Storage Setup%s\n\n", colorBold, colorReset)
+	printInfo("Use a container-scoped SAS URL with read/write/list/delete permissions.")
+	printInfo("Example: https://<account>.blob.core.windows.net/<container>?sv=...&sp=rwdl&sig=...")
+	fmt.Println()
+
+	if azureURL == "" {
+		azureURL = os.Getenv("CLAUDE_SYNC_AZURE_URL")
+	}
+
+	var sasURL string
+	prompt := &survey.Input{
+		Message: "Azure container SAS URL:",
+		Default: azureURL,
+	}
+	if err := survey.AskOne(prompt, &sasURL, survey.WithValidator(func(ans interface{}) error {
+		v, _ := ans.(string)
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return fmt.Errorf("SAS URL is required")
+		}
+
+		u, err := url.Parse(v)
+		if err != nil {
+			return fmt.Errorf("invalid URL: %w", err)
+		}
+		if u.Scheme != "https" || u.Host == "" {
+			return fmt.Errorf("URL must be a valid https:// Azure Blob URL")
+		}
+		if strings.Trim(strings.TrimPrefix(u.Path, "/"), " ") == "" {
+			return fmt.Errorf("URL must include a container name in the path")
+		}
+		if u.RawQuery == "" {
+			return fmt.Errorf("URL must include SAS query parameters")
+		}
+		return nil
+	})); err != nil {
+		return nil, err
+	}
+
+	container := ""
+	if u, err := url.Parse(sasURL); err == nil {
+		p := strings.TrimPrefix(u.Path, "/")
+		if i := strings.Index(p, "/"); i >= 0 {
+			container = p[:i]
+		} else {
+			container = p
+		}
+	}
+
+	return &storage.StorageConfig{
+		Provider: storage.ProviderAzure,
+		Bucket:   container,
+		AzureURL: sasURL,
+	}, nil
 }
 
 func runLocalWSLWizard(localSource string) (string, error) {
