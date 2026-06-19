@@ -84,8 +84,35 @@ claude-sync pull
 | **S3-compatible** | varies | Backblaze B2, MinIO, Wasabi, DigitalOcean Spaces, self-hosted |
 | **Azure Blob Storage** | 5GB (12 months) | Azure / Microsoft ecosystem users |
 | **WebDAV** | Self-hosted (unlimited) | Nextcloud/ownCloud users |
+| **Local WSL** | N/A (local only) | WSL-only Windows -> WSL VS Code extension sync (no cloud) |
 
 ### Step 2: Create a Bucket
+
+If you choose **Local WSL** (visible only when running inside WSL), skip bucket creation: `init` will prompt for a local source directory and accepts either:
+
+- a Windows path (for example `D:\PortableApps\VSCodeInsiders`) — automatically converted to `/mnt/d/...`
+- a direct WSL-mounted path (for example `/mnt/c/Users/<you>/AppData/Roaming/Code`)
+
+Common Windows VS Code locations you can enter directly:
+
+- Installed VS Code (Stable): `C:\Users\<you>\AppData\Roaming\Code`
+- Installed VS Code (Insiders): `C:\Users\<you>\AppData\Roaming\Code - Insiders`
+- Portable VS Code: `<VSCodeFolder>\data\user-data`
+
+During `init`, Local WSL now provides a source-type menu:
+
+- Installed VS Code (Stable)
+- Installed VS Code (Insiders)
+- Portable / Other (manual `user-data` path input)
+
+Manual path input is required for **Portable / Other** and should point to the VS Code `data\user-data` directory.
+
+For cloud providers (R2/S3/GCS/S3-compatible/WebDAV), `init` now also asks:
+
+- **Also sync VS Code extension data?** (yes/no)
+- If **yes**, select source type: Stable, Insiders, or Portable/Other and provide the VS Code user-data location.
+
+This VS Code data sync uses the same selected external provider and encryption key as the regular Claude sync.
 
 <details>
 <summary><b>Cloudflare R2</b> (recommended)</summary>
@@ -215,6 +242,14 @@ claude-sync pull
 | `~/.claude/settings.json` | Settings |
 | `~/.claude/settings.local.json` | Local settings |
 | `~/.claude/CLAUDE.md` | Global instructions |
+| `~/.claude/cowork/` | Cowork project outputs and state |
+
+**Platform-specific locations:**
+- **macOS & Linux**: `~/.claude/` (home directory)
+- **Windows (Desktop installer)**: `~/.claude/` (home directory)
+- **Windows (Microsoft Store app)**: `AppData\Local\Packages\Claude_*\LocalCache\Roaming\Claude\` (automatically detected)
+
+**Automatic cache exclusions:** When using the Windows Store app, claude-sync automatically excludes cache and runtime directories (~9.3 GB of VM bundles, browser caches, logs, etc.) that are regenerated on demand. This reduces sync size from 10 GB to ~20-30 MB of actual portable data.
 
 ### Sync scope
 
@@ -222,14 +257,29 @@ claude-sync pull
 
 | Scope | Syncs | Use when |
 |-------|-------|----------|
-| `full` (default) | everything in the table above | you want settings, skills, agents, and plugins mirrored too |
-| `sessions` | `projects/`, `history.jsonl`, `tasks/`, `plans/` only | you just want `claude --resume` to work across machines |
+| `full` (default) | everything in the table above | you want settings, skills, agents, plugins, and Cowork data mirrored too |
+| `sessions` | `projects/`, `history.jsonl`, `tasks/`, `plans/`, `cowork/` | you just want `claude --resume` and Cowork tasks to work across machines |
 
 ```bash
 claude-sync init --scope sessions
 ```
 
 **Why `sessions` exists:** `full` includes `plugins/`, whose plugin caches bundle `node_modules` and Python `.venv` trees — thousands of large, machine-/arch-specific files that are regenerated on demand and should not be synced. `sessions` skips them, keeping syncs small, fast, and portable. The scope is saved in `~/.claude-sync/config.yaml` and applies to every `push`/`pull`.
+
+### Automatically Excluded Directories
+
+When using the Windows Store app, the following are automatically excluded (these are regenerated on demand and shouldn't be synced):
+
+- **vm_bundles/** — Cowork VM runtime (~9.3 GB)
+- **claude-code/** — VS Code runtime binaries
+- **Cache/**, **Code Cache/** — Browser and compilation caches
+- **GPUCache/**, **DawnGraphiteCache/** — Graphics rendering caches
+- **dxt-install-*/** — Temporary installers
+- **logs/** — Application logs
+- **Preferences**, **Session Storage/** — UI state (regenerated per session)
+- **sentry/** — Error reporting data
+
+If you want to manually override these exclusions, add an `exclude:` list to your config file (will disable automatic exclusions).
 
 ## Cross-Device Path Mapping
 
@@ -485,6 +535,32 @@ git clone https://github.com/tawanorg/claude-sync
 cd claude-sync
 make build
 ./bin/claude-sync --version
+```
+
+## Windows Store App & Cowork Support
+
+### Windows Microsoft Store App
+
+Claude Desktop is now distributed via the Microsoft Store as an MSIX package on Windows. Claude-sync automatically detects and syncs from the Store app location:
+
+```
+AppData\Local\Packages\Claude_<hash>\LocalCache\Roaming\Claude\
+```
+
+**No configuration needed** — claude-sync checks for the Store app first, then falls back to the traditional `~/.claude/` location. Both work seamlessly.
+
+### Cowork Data
+
+Cowork project outputs and state are now included in sync scopes:
+
+- **`full` scope**: All Cowork data in `~/.claude/cowork/`
+- **`sessions` scope**: Cowork task files and project outputs
+
+This allows Cowork tasks and project outputs to sync across devices without manual file management. Configure during `init`:
+
+```bash
+claude-sync init --scope full    # Sync Claude Code + Cowork
+claude-sync init --scope sessions # Sync just conversations + Cowork tasks
 ```
 
 ## Development

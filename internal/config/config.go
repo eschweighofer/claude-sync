@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -31,6 +32,19 @@ const (
 type Config struct {
 	// New storage configuration (preferred)
 	Storage *storage.StorageConfig `yaml:"storage,omitempty"`
+
+	// LocalWSLSource enables local WSL sync mode (no cloud storage):
+	// files are pulled from this source directory (typically /mnt/<drive>/...)
+	// into local WSL VS Code user-data storage.
+	LocalWSLSource string `yaml:"local_wsl_source,omitempty"`
+
+	// LocalWSLProfile indicates which WSL VS Code target should be used for
+	// local-wsl mode. Supported values: "stable", "insiders".
+	LocalWSLProfile string `yaml:"local_wsl_profile,omitempty"`
+
+	// VSCodeSyncSource enables optional VS Code extension data sync via the
+	// configured external provider. Path should point to VS Code user-data root.
+	VSCodeSyncSource string `yaml:"vscode_sync_source,omitempty"`
 
 	// Legacy R2-only fields (for backward compatibility)
 	AccountID       string `yaml:"account_id,omitempty"`
@@ -87,6 +101,8 @@ var SyncPaths = []string{
 	"tasks",
 	"history.jsonl",
 	"rules",
+	// Cowork data (Windows Store app only)
+	"cowork",
 }
 
 // SessionSyncPaths is the subset synced in the "sessions" scope: portable,
@@ -98,6 +114,7 @@ var SessionSyncPaths = []string{
 	"history.jsonl",
 	"tasks",
 	"plans",
+	"cowork",
 }
 
 // ScopedSyncPaths returns the sync path set for the given scope. "sessions"
@@ -130,7 +147,46 @@ func AgeKeyFilePath() string {
 	return filepath.Join(ConfigDirPath(), AgeKeyFile)
 }
 
+// FindWindowsStoreClaudeDir attempts to locate the Windows Store Claude Desktop app data directory.
+// Returns the path if found, or empty string if not on Windows or app not installed.
+func FindWindowsStoreClaudeDir() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	// Windows Store app location: AppData\Local\Packages\Claude_<hash>\LocalCache\Roaming\Claude
+	appDataPath := filepath.Join(home, "AppData", "Local", "Packages")
+	entries, err := os.ReadDir(appDataPath)
+	if err != nil {
+		return ""
+	}
+
+	// Look for Claude_* package directory
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "Claude_") {
+			claudePath := filepath.Join(appDataPath, entry.Name(), "LocalCache", "Roaming", "Claude")
+			// Verify the directory exists and has expected structure
+			if _, err := os.Stat(claudePath); err == nil {
+				return claudePath
+			}
+		}
+	}
+
+	return ""
+}
+
 func ClaudeDir() string {
+	// On Windows, check for Store app location first
+	if storeDir := FindWindowsStoreClaudeDir(); storeDir != "" {
+		return storeDir
+	}
+
+	// Fall back to traditional home directory location
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -145,6 +201,41 @@ func ClaudeJSONPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".claude.json")
+}
+
+// GetWindowsStoreDefaultExclusions returns recommended exclude patterns for Windows Store app.
+// These are cache and runtime directories that are regenerated on demand and should not be synced.
+func GetWindowsStoreDefaultExclusions() []string {
+	return []string{
+		// Cowork VM bundles (~9 GB) - re-downloaded automatically
+		"vm_bundles/**",
+
+		// VS Code and runtime binaries - regenerated per version
+		"claude-code/**",
+		"claude-code-vm/**",
+
+		// Browser/Electron caches - regenerated automatically
+		"Cache/**",
+		"Code Cache/**",
+		"GPUCache/**",
+		"DawnGraphiteCache/**",
+		"DawnWebGPUCache/**",
+
+		// Temporary files and logs
+		"dxt-install-*/**",
+		"logs/**",
+		"Crashpad/**",
+
+		// UI state - regenerated per session
+		"Preferences",
+		"Session Storage/**",
+
+		// Error reporting
+		"sentry/**",
+
+		// Graphics and rendering caches
+		"Network/**",
+	}
 }
 
 func Load() (*Config, error) {
@@ -180,6 +271,14 @@ func Load() (*Config, error) {
 			expanded[p] = name
 		}
 		cfg.PathMap = expanded
+	}
+
+	// Automatically apply Windows Store app cache exclusions if on Windows Store
+	// and user hasn't explicitly configured exclusions
+	if runtime.GOOS == "windows" && len(cfg.Exclude) == 0 {
+		if storeDir := FindWindowsStoreClaudeDir(); storeDir != "" {
+			cfg.Exclude = GetWindowsStoreDefaultExclusions()
+		}
 	}
 
 	// Set default endpoint for Cloudflare R2
