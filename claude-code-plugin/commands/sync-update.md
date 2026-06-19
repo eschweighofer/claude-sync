@@ -40,6 +40,6 @@ npm update -g @tawandotorg/claude-sync
 **Direct download:**
 ```bash
 # macOS ARM
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-darwin-arm64 -o /usr/local/bin/claude-sync
+curl -L https://github.com/eschweighofer/claude-sync/releases/latest/download/claude-sync-darwin-arm64 -o /usr/local/bin/claude-sync
 chmod +x /usr/local/bin/claude-sync
 ```

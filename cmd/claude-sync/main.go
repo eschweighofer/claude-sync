@@ -20,17 +20,17 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/tawanorg/claude-sync/internal/config"
-	"github.com/tawanorg/claude-sync/internal/crypto"
-	"github.com/tawanorg/claude-sync/internal/storage"
-	"github.com/tawanorg/claude-sync/internal/sync"
-	"github.com/tawanorg/claude-sync/internal/util"
+	"github.com/eschweighofer/claude-sync/internal/config"
+	"github.com/eschweighofer/claude-sync/internal/crypto"
+	"github.com/eschweighofer/claude-sync/internal/storage"
+	"github.com/eschweighofer/claude-sync/internal/sync"
+	"github.com/eschweighofer/claude-sync/internal/util"
 
 	// Register storage adapters
-	_ "github.com/tawanorg/claude-sync/internal/storage/gcs"
-	_ "github.com/tawanorg/claude-sync/internal/storage/r2"
-	_ "github.com/tawanorg/claude-sync/internal/storage/s3"
-	_ "github.com/tawanorg/claude-sync/internal/storage/webdav"
+	_ "github.com/eschweighofer/claude-sync/internal/storage/gcs"
+	_ "github.com/eschweighofer/claude-sync/internal/storage/r2"
+	_ "github.com/eschweighofer/claude-sync/internal/storage/s3"
+	_ "github.com/eschweighofer/claude-sync/internal/storage/webdav"
 )
 
 var (
@@ -93,7 +93,7 @@ func printBanner() {
 	fmt.Printf("%s\n", colorReset)
 
 	fmt.Printf("  %sSync your Claude Code sessions across all your devices.%s\n", colorDim, colorReset)
-	fmt.Printf("  %sIssues & PRs welcome: %shttps://github.com/tawanorg/claude-sync%s\n", colorDim, colorCyan, colorReset)
+	fmt.Printf("  %sIssues & PRs welcome: %shttps://github.com/eschweighofer/claude-sync%s\n", colorDim, colorCyan, colorReset)
 	fmt.Println()
 }
 
@@ -2964,7 +2964,7 @@ Examples:
 			}
 
 			fmt.Println()
-			fmt.Printf("%sView all releases: %shttps://github.com/tawanorg/claude-sync/releases%s\n", colorDim, colorCyan, colorReset)
+			fmt.Printf("%sView all releases: %shttps://github.com/eschweighofer/claude-sync/releases%s\n", colorDim, colorCyan, colorReset)
 			fmt.Println()
 
 			return nil

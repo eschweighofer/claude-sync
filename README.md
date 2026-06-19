@@ -6,7 +6,7 @@
 
 *Encrypted with [age](https://github.com/FiloSottile/age) • R2 / S3 / GCS / Azure / WebDAV supported*
 
-[![Release](https://img.shields.io/github/v/release/tawanorg/claude-sync)](https://github.com/tawanorg/claude-sync/releases)
+[![Release](https://img.shields.io/github/v/release/tawanorg/claude-sync)](https://github.com/eschweighofer/claude-sync/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/@tawandotorg/claude-sync)](https://www.npmjs.com/package/@tawandotorg/claude-sync)
 [![Socket Badge](https://badge.socket.dev/npm/package/@tawandotorg/claude-sync/1.11.1)](https://badge.socket.dev/npm/package/@tawandotorg/claude-sync/1.11.1)
@@ -511,19 +511,19 @@ npm install -g @tawanorg/claude-sync
 
 ```bash
 # macOS ARM (M1/M2/M3)
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-darwin-arm64 -o claude-sync
+curl -L https://github.com/eschweighofer/claude-sync/releases/latest/download/claude-sync-darwin-arm64 -o claude-sync
 chmod +x claude-sync
 sudo mv claude-sync /usr/local/bin/
 ```
 
-See [GitHub Releases](https://github.com/tawanorg/claude-sync/releases) for all platforms.
+See [GitHub Releases](https://github.com/eschweighofer/claude-sync/releases) for all platforms.
 
 ### Go Install
 
 **Prerequisite:** Go 1.21+ (for developers)
 
 ```bash
-go install github.com/tawanorg/claude-sync/cmd/claude-sync@latest
+go install github.com/eschweighofer/claude-sync/cmd/claude-sync@latest
 ```
 
 ### Build from Source
@@ -531,7 +531,7 @@ go install github.com/tawanorg/claude-sync/cmd/claude-sync@latest
 **Prerequisite:** Go 1.21+
 
 ```bash
-git clone https://github.com/tawanorg/claude-sync
+git clone https://github.com/eschweighofer/claude-sync
 cd claude-sync
 make build
 ./bin/claude-sync --version

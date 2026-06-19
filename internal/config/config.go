@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/tawanorg/claude-sync/internal/storage"
+	"github.com/eschweighofer/claude-sync/internal/storage"
 	"gopkg.in/yaml.v3"
 )
 

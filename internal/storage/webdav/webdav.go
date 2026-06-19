@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tawanorg/claude-sync/internal/storage"
+	"github.com/eschweighofer/claude-sync/internal/storage"
 )
 
 func init() {

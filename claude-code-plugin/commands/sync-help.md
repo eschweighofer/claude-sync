@@ -91,5 +91,5 @@ Use `--passphrase` if you entered the wrong passphrase on a new device.
 
 ## More Info
 
-- CLI docs: https://github.com/tawanorg/claude-sync
-- Report issues: https://github.com/tawanorg/claude-sync/issues
+- CLI docs: https://github.com/eschweighofer/claude-sync
+- Report issues: https://github.com/eschweighofer/claude-sync/issues

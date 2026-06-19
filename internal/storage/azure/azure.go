@@ -12,7 +12,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	acontainer "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 
-	storage "github.com/tawanorg/claude-sync/internal/storage"
+	storage "github.com/eschweighofer/claude-sync/internal/storage"
 )
 
 // AzureProvider implements Storage using Azure Blob Storage with a container-scoped SAS URL.

@@ -3,7 +3,7 @@ package azure
 import (
 	"testing"
 
-	storage "github.com/tawanorg/claude-sync/internal/storage"
+	storage "github.com/eschweighofer/claude-sync/internal/storage"
 )
 
 func TestNew_ValidURL(t *testing.T) {

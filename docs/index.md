@@ -7,7 +7,7 @@ title: Claude Sync - Technical Documentation
 
 **Encrypted cross-device synchronization for Claude Code sessions**
 
-[Architecture](./architecture) | [How It Works](./how-it-works) | [Security](./security) | [GitHub](https://github.com/tawanorg/claude-sync)
+[Architecture](./architecture) | [How It Works](./how-it-works) | [Security](./security) | [GitHub](https://github.com/eschweighofer/claude-sync)
 
 ---
 
@@ -57,7 +57,7 @@ Claude Sync provides:
 ```bash
 # Install (pick one)
 npm install -g @tawandotorg/claude-sync
-# or: go install github.com/tawanorg/claude-sync/cmd/claude-sync@latest
+# or: go install github.com/eschweighofer/claude-sync/cmd/claude-sync@latest
 
 # Set up (interactive wizard)
 claude-sync init
@@ -96,27 +96,27 @@ npm install -g @tawandotorg/claude-sync
 ### Go Install
 
 ```bash
-go install github.com/tawanorg/claude-sync/cmd/claude-sync@latest
+go install github.com/eschweighofer/claude-sync/cmd/claude-sync@latest
 ```
 
 ### Download Binary
 
-Download from [GitHub Releases](https://github.com/tawanorg/claude-sync/releases):
+Download from [GitHub Releases](https://github.com/eschweighofer/claude-sync/releases):
 
 ```bash
 # macOS ARM (M1/M2/M3)
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-darwin-arm64 -o claude-sync
+curl -L https://github.com/eschweighofer/claude-sync/releases/latest/download/claude-sync-darwin-arm64 -o claude-sync
 chmod +x claude-sync
 sudo mv claude-sync /usr/local/bin/
 
 # macOS Intel
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-darwin-amd64 -o claude-sync
+curl -L https://github.com/eschweighofer/claude-sync/releases/latest/download/claude-sync-darwin-amd64 -o claude-sync
 
 # Linux AMD64
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-linux-amd64 -o claude-sync
+curl -L https://github.com/eschweighofer/claude-sync/releases/latest/download/claude-sync-linux-amd64 -o claude-sync
 
 # Linux ARM64
-curl -L https://github.com/tawanorg/claude-sync/releases/latest/download/claude-sync-linux-arm64 -o claude-sync
+curl -L https://github.com/eschweighofer/claude-sync/releases/latest/download/claude-sync-linux-arm64 -o claude-sync
 ```
 
 ---
@@ -242,4 +242,4 @@ Claude sessions typically use < 50MB. Syncing is effectively **free** on any pro
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/tawanorg/claude-sync/blob/main/LICENSE)
+MIT License - see [LICENSE](https://github.com/eschweighofer/claude-sync/blob/main/LICENSE)

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tawanorg/claude-sync/internal/storage"
+	"github.com/eschweighofer/claude-sync/internal/storage"
 )
 
 func TestNew(t *testing.T) {

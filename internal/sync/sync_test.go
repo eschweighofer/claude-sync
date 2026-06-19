@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tawanorg/claude-sync/internal/config"
-	"github.com/tawanorg/claude-sync/internal/crypto"
+	"github.com/eschweighofer/claude-sync/internal/config"
+	"github.com/eschweighofer/claude-sync/internal/crypto"
 )
 
 // TestFullWorkflowWithLocalState tests the sync workflow with real crypto

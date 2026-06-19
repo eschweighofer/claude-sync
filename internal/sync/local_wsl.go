@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tawanorg/claude-sync/internal/config"
+	"github.com/eschweighofer/claude-sync/internal/config"
 )
 
 // PullFromLocalWSL copies VS Code extension data from a Windows-mounted source
