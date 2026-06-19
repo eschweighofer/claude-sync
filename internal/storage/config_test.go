@@ -160,7 +160,7 @@ func TestStorageConfig_Validate(t *testing.T) {
 			config: StorageConfig{
 				Provider:       ProviderWebDAV,
 				WebDAVURL:      "https://cloud.example.com/remote.php/dav/files/user/",
-				WebDAVUsername:  "user",
+				WebDAVUsername: "user",
 				WebDAVPassword: "app-password",
 				PathPrefix:     "claude-sync",
 			},
@@ -170,7 +170,7 @@ func TestStorageConfig_Validate(t *testing.T) {
 			name: "WebDAV missing URL",
 			config: StorageConfig{
 				Provider:       ProviderWebDAV,
-				WebDAVUsername:  "user",
+				WebDAVUsername: "user",
 				WebDAVPassword: "app-password",
 			},
 			wantErr: true,
@@ -189,8 +189,8 @@ func TestStorageConfig_Validate(t *testing.T) {
 		{
 			name: "WebDAV missing password",
 			config: StorageConfig{
-				Provider:      ProviderWebDAV,
-				WebDAVURL:     "https://cloud.example.com/remote.php/dav/files/user/",
+				Provider:       ProviderWebDAV,
+				WebDAVURL:      "https://cloud.example.com/remote.php/dav/files/user/",
 				WebDAVUsername: "user",
 			},
 			wantErr: true,
@@ -201,7 +201,7 @@ func TestStorageConfig_Validate(t *testing.T) {
 			config: StorageConfig{
 				Provider:       ProviderWebDAV,
 				WebDAVURL:      "https://cloud.example.com/remote.php/dav/files/user/",
-				WebDAVUsername:  "user",
+				WebDAVUsername: "user",
 				WebDAVPassword: "app-password",
 			},
 			wantErr: false,

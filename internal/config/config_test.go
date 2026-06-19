@@ -394,6 +394,17 @@ func TestIsExcluded(t *testing.T) {
 		{"partial name no match", "plugins/cachedata/file.txt", []string{"plugins/cache/**"}, false},
 		{"shell-snapshots", "shell-snapshots/snap.json", []string{"shell-snapshots/**"}, true},
 		{"telemetry dir", "telemetry/data.json", []string{"telemetry/**"}, true},
+
+		// Recursive globstar patterns (Issue #43)
+		{"globstar .git at root", ".git/HEAD", []string{"**/.git/**"}, true},
+		{"globstar .git nested", "projects/someproject/.git/config", []string{"**/.git/**"}, true},
+		{"globstar .git deeply nested", "projects/foo/bar/.git/objects/ab/cd", []string{"**/.git/**"}, true},
+		{"globstar .git dir itself", "projects/app/.git", []string{"**/.git/**"}, true},
+		{"globstar non-matching", "projects/app/git/config", []string{"**/.git/**"}, false},
+		{"globstar node_modules anywhere", "projects/foo/node_modules/lodash/index.js", []string{"**/node_modules/**"}, true},
+		{"globstar node_modules deep", "a/b/c/d/node_modules/pkg/lib/file.js", []string{"**/node_modules/**"}, true},
+		{"leading ** with extension", "deeply/nested/path/file.log", []string{"**/*.log"}, true},
+		{"combined patterns from issue", "projects/foo/.git/objects/ab", []string{"*.tmp", "projects/*/node_modules/*", "**/.git/**"}, true},
 	}
 
 	for _, tt := range tests {
