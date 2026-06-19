@@ -6,34 +6,55 @@ on:
       version:
         description: 'Release version (e.g. v1.2.2)'
         required: true
+      targets:
+        description: 'Build targets preset'
+        required: true
+        default: 'windows-amd64'
+        type: choice
+        options:
+          - windows-amd64
+          - linux-amd64
+          - windows-linux-amd64
 
 permissions:
   contents: write
 
 jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Build matrix from UI selection
+        id: set-matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          selection="${{ inputs.targets }}"
+
+          case "$selection" in
+            windows-amd64)
+              matrix='{"include":[{"goos":"windows","goarch":"amd64","ext":".exe"}]}'
+              ;;
+            linux-amd64)
+              matrix='{"include":[{"goos":"linux","goarch":"amd64","ext":""}]}'
+              ;;
+            windows-linux-amd64)
+              matrix='{"include":[{"goos":"windows","goarch":"amd64","ext":".exe"},{"goos":"linux","goarch":"amd64","ext":""}]}'
+              ;;
+            *)
+              echo "Unsupported target selection: $selection" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare-matrix
     runs-on: ubuntu-latest
     strategy:
-      matrix:
-        include:
-          - goos: windows
-            goarch: amd64
-            ext: .exe
-#          - goos: windows
-#            goarch: arm64
-#            ext: .exe
-#          - goos: darwin
-#            goarch: amd64
-#            ext: ""
-#          - goos: darwin
-#            goarch: arm64
-#            ext: ""
-#          - goos: linux
-#            goarch: amd64
-#            ext: ""
-#          - goos: linux
-#            goarch: arm64
-#            ext: ""
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
