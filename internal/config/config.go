@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/tawanorg/claude-sync/internal/storage"
 	"gopkg.in/yaml.v3"
 )
@@ -238,44 +239,43 @@ func (c *Config) IsLegacyConfig() bool {
 
 // IsExcluded returns true if the given relative path matches any exclude pattern.
 // Patterns support:
-//   - filepath.Match glob syntax (e.g. "plugins/marketplace*", "*.tmp")
+//   - Full doublestar glob syntax including ** for recursive matching
+//   - Examples: "**/.git/**", "*.tmp", "plugins/cache/**", "projects/*/node_modules/**"
 //   - Directory prefix (e.g. "plugins/marketplace" matches everything under it)
-//   - Recursive wildcard (e.g. "plugins/cache/**" matches directory and all contents)
 //   - Filename glob (e.g. "*.tmp" matches "foo/bar/file.tmp")
 func (c *Config) IsExcluded(relPath string) bool {
-	for _, pattern := range c.Exclude {
-		// Handle "dir/**" pattern: match directory and everything under it
-		if strings.HasSuffix(pattern, "/**") {
-			dirPrefix := strings.TrimSuffix(pattern, "/**")
-			if relPath == dirPrefix || strings.HasPrefix(relPath, dirPrefix+"/") {
-				return true
-			}
-			continue
-		}
+	// Normalize path separators for consistent matching
+	relPath = filepath.ToSlash(relPath)
 
-		// Try glob match on full path
-		matched, err := filepath.Match(pattern, relPath)
+	for _, pattern := range c.Exclude {
+		// Normalize pattern separators
+		pattern = filepath.ToSlash(pattern)
+
+		// Use doublestar for full glob matching including ** support
+		matched, err := doublestar.Match(pattern, relPath)
 		if err == nil && matched {
 			return true
 		}
 
 		// Try glob match on filename only (for patterns like "*.tmp")
-		if strings.Contains(pattern, "*") || strings.Contains(pattern, "?") {
-			if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
+		// but only if the pattern doesn't contain path separators
+		if !strings.Contains(pattern, "/") && (strings.Contains(pattern, "*") || strings.Contains(pattern, "?")) {
+			if matched, _ := doublestar.Match(pattern, filepath.Base(relPath)); matched {
 				return true
 			}
 		}
 
 		// Also match if the path starts with the pattern as a directory prefix
 		// This lets "plugins/marketplace" exclude everything under that dir
-		if len(relPath) > len(pattern) && relPath[:len(pattern)] == pattern &&
-			(relPath[len(pattern)] == '/' || relPath[len(pattern)] == '\\') {
-			return true
-		}
-
-		// Exact match
-		if relPath == pattern {
-			return true
+		if !strings.Contains(pattern, "*") && !strings.Contains(pattern, "?") {
+			if len(relPath) > len(pattern) && relPath[:len(pattern)] == pattern &&
+				relPath[len(pattern)] == '/' {
+				return true
+			}
+			// Exact match for non-glob patterns
+			if relPath == pattern {
+				return true
+			}
 		}
 	}
 	return false
